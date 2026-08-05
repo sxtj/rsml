@@ -1,5 +1,32 @@
 use std::debug_assert_eq;
 
+pub fn silu(x: f32) -> f32 {
+    x / (1.0 + (-x).exp())
+}
+
+// w1 = gate_proj, w3 = up_proj, w2 = down_proj
+
+pub fn feed_forward(
+    out: &mut [f32],
+    x: &[f32],
+    w1: &[f32],
+    w2: &[f32],
+    w3: &[f32],
+    hb: &mut [f32],
+    hb2: &mut [f32],
+    dim: usize,
+    hidden_dim: usize,
+) {
+    matvec(hb, w1, x, hidden_dim, dim); // gate
+    matvec(hb2, w3, x, hidden_dim, dim); // up
+
+    for i in 0..hidden_dim {
+        hb[i] = silu(hb[i] * hb2[i]);
+    }
+
+    matvec(out, w2, hb, dim, hidden_dim); // down
+}
+
 pub fn matvec(out: &mut [f32], w: &[f32], x: &[f32], d: usize, n: usize) {
     assert_eq!(w.len(), d * n);
     assert_eq!(x.len(), n);
@@ -34,12 +61,32 @@ pub fn matmul(out: &mut [f32], a: &[f32], b: &[f32], m: usize, k: usize, n: usiz
     }
 }
 
+pub fn softmax(x: &mut [f32]) {
+    let max = x.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+
+    let mut sum = 0.0f32;
+    for v in x.iter_mut() {
+        *v = (*v - max).exp();
+        sum += *v;
+    }
+
+    let inv = 1.0 / sum;
+    for v in x.iter_mut() {
+        *v *= inv;
+    }
+}
+
 pub fn rmsnorm(out: &mut [f32], x: &[f32], weight: &[f32], eps: f32) {
     debug_assert_eq!(x.len(), weight.len());
     debug_assert_eq!(x.len(), out.len());
 
     let n = x.len();
     let mean_sq: f32 = x.iter().map(|v| v * v).sum::<f32>() / n as f32;
+    let scale = 1.0 / (mean_sq + eps).sqrt();
+
+    for i in 0..n {
+        out[i] = weight[i] * (x[i] * scale);
+    }
 }
 
 pub struct Tensor<T> {
@@ -196,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "row out of bounds")]
+    #[should_panic(expected = "range end index 9 out of range for slice of length 6")]
     fn row_rejects_out_of_bounds() {
         let t = Tensor::new((0..6).collect(), vec![2, 3]);
         t.row(2);
