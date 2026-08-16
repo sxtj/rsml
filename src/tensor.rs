@@ -4,6 +4,16 @@ pub fn silu(x: f32) -> f32 {
     x / (1.0 + (-x).exp())
 }
 
+pub fn add_in_place(x: &mut [f32], y: &mut [f32]) {
+    for i in 0..x.len() {
+        x[i] += y[i];
+    }
+}
+
+pub fn embed(out: &mut [f32], table: &[f32], token: usize, dim: usize) {
+    out.copy_from_slice(&table[token * dim..(token + 1) * dim]);
+}
+
 // w1 = gate_proj, w3 = up_proj, w2 = down_proj
 
 pub fn feed_forward(
@@ -21,10 +31,29 @@ pub fn feed_forward(
     matvec(hb2, w3, x, hidden_dim, dim); // up
 
     for i in 0..hidden_dim {
-        hb[i] = silu(hb[i] * hb2[i]);
+        hb[i] = silu(hb[i]) * hb2[i];
     }
 
     matvec(out, w2, hb, dim, hidden_dim); // down
+}
+
+pub fn rope(q: &mut [f32], k: &mut [f32], pos: usize, head_size: usize, kv_dim: usize) {
+    let dim = q.len();
+
+    for i in (0..dim).step_by(2) {
+        let head_dim = (i % head_size) as f32;
+        let freq = 1.0 / 10_000f32.powf(head_dim / head_size as f32);
+        let val = pos as f32 * freq;
+        let (fci, fcr) = val.sin_cos();
+
+        let rotn = if i < kv_dim { 2 } else { 1 };
+        for v in 0..rotn {
+            let vec: &mut [f32] = if v == 0 { &mut *q } else { &mut *k };
+            let (v0, v1) = (vec[i], vec[i + 1]);
+            vec[i] = v0 * fcr - v1 * fci;
+            vec[i + 1] = v0 * fci + v1 * fcr;
+        }
+    }
 }
 
 pub fn matvec(out: &mut [f32], w: &[f32], x: &[f32], d: usize, n: usize) {
