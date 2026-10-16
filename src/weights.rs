@@ -1,24 +1,26 @@
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
-    pub dim: usize, //transformer width
-    pub hidden_dim: usize,
-    pub n_layers: usize,
-    pub n_heads: usize,
-    pub n_kv_heads: usize,
-    pub vocab_size: usize,
-    pub seq_len: usize, //max context
+    pub dim: usize,        // transformer width
+    pub hidden_dim: usize, // ffn hidden size
+    pub n_layers: usize,   // num of layers
+    pub n_heads: usize,    // attention heads
+    pub n_kv_heads: usize, // key/value heads
+    pub vocab_size: usize, // number of tokens
+    pub seq_len: usize,    // max context
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Weights<'a> {
     pub token_embedding: &'a [f32],
 
+    // attention normalization
     pub rms_att: &'a [f32],
 
-    pub wq: &'a [f32],
-    pub wk: &'a [f32],
-    pub wv: &'a [f32],
-    pub wo: &'a [f32],
+    // attention weights
+    pub wq: &'a [f32], // query
+    pub wk: &'a [f32], // key
+    pub wv: &'a [f32], // value
+    pub wo: &'a [f32], // output
 
     pub rms_ffn: &'a [f32],
 
@@ -26,11 +28,13 @@ pub struct Weights<'a> {
     pub w2: &'a [f32],
     pub w3: &'a [f32],
 
+    // final normalization
     pub rms_final: &'a [f32],
 
     pub wcls: &'a [f32],
 }
 
+// track pos in weights
 struct Cursor<'a> {
     data: &'a [f32],
     pos: usize,
@@ -41,7 +45,7 @@ impl<'a> Cursor<'a> {
         let start = self.pos;
         let end = start + n;
 
-        let slice = &self.sata[start..end];
+        let slice = &self.data[start..end];
 
         self.pos = end;
 
@@ -49,6 +53,7 @@ impl<'a> Cursor<'a> {
     }
 }
 
+// read model settings from the header
 pub fn parse_config(bytes: &[u8]) -> Result<(Config, bool), String> {
     if bytes.len() < 28 {
         return Err("File is too small".to_string());
@@ -58,7 +63,7 @@ pub fn parse_config(bytes: &[u8]) -> Result<(Config, bool), String> {
 
     for i in 0..7 {
         let start = i * 4;
-        headers[i] = i32::from_le_bytes(bytes[start..start + 4].try_into().unwrap());
+        header[i] = i32::from_le_bytes(bytes[start..start + 4].try_into().unwrap());
     }
 
     let raw_vocab = header[5];
@@ -74,7 +79,7 @@ pub fn parse_config(bytes: &[u8]) -> Result<(Config, bool), String> {
         seq_len: header[6] as usize,
     };
 
-    Ok((Config, shared_weights))
+    Ok((config, shared_weights))
 }
 
 fn read_floats(bytes: &[u8]) -> Result<Vec<f32>, String> {
@@ -82,13 +87,13 @@ fn read_floats(bytes: &[u8]) -> Result<Vec<f32>, String> {
         return Err("Invalid float data length".to_string());
     }
 
-    Ok(Bytes
+    Ok(bytes
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
         .collect())
 }
 
-pub fn load_weights<'a>(cfg: &config, floats: &'a [f32], shared_weights: bool) -> Weights<'a> {
+pub fn load_weights<'a>(cfg: &Config, floats: &'a [f32], shared_weights: bool) -> Weights<'a> {
     let mut cursor = Cursor {
         data: floats,
         pos: 0,
@@ -123,4 +128,19 @@ pub fn load_weights<'a>(cfg: &config, floats: &'a [f32], shared_weights: bool) -
     } else {
         cursor.take(cfg.vocab_size * dim)
     };
+
+    Weights {
+        token_embedding,
+        rms_att,
+        wq,
+        wk,
+        wv,
+        wo,
+        rms_ffn,
+        w1,
+        w2,
+        w3,
+        rms_final,
+        wcls,
+    }
 }
