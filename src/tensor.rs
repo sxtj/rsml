@@ -37,12 +37,19 @@ pub fn feed_forward(
     matvec(out, w2, hb, dim, hidden_dim); // down
 }
 
-pub fn rope(q: &mut [f32], k: &mut [f32], pos: usize, head_size: usize, kv_dim: usize) {
+pub fn rope(
+    q: &mut [f32],
+    k: &mut [f32],
+    pos: usize,
+    head_size: usize,
+    kv_dim: usize,
+    rope_theta: f32,
+) {
     let dim = q.len();
 
     for i in (0..dim).step_by(2) {
         let head_dim = (i % head_size) as f32;
-        let freq = 1.0 / 10_000f32.powf(head_dim / head_size as f32);
+        let freq = 1.0 / rope_theta.powf(head_dim / head_size as f32);
         let val = pos as f32 * freq;
         let (fci, fcr) = val.sin_cos();
 
@@ -357,5 +364,98 @@ mod tests {
         assert_eq!(t.len(), 24);
         assert_eq!(t.rank(), 3);
         assert_eq!(t.shape(), &[2, 3, 4]);
+    }
+
+    #[test]
+    fn softmax_sums_to_one() {
+        let mut x = vec![1.0, 2.0, 3.0];
+
+        softmax(&mut x);
+
+        let sum: f32 = x.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn softmax_equal_inputs_are_uniform() {
+        let mut x = vec![1.0, 1.0, 1.0];
+
+        softmax(&mut x);
+
+        for v in x {
+            assert!((v - 1.0 / 3.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn softmax_preserves_order() {
+        let mut x = vec![1.0, 2.0, 3.0];
+
+        softmax(&mut x);
+
+        assert!(x[2] > x[1]);
+        assert!(x[1] > x[0]);
+    }
+
+    #[test]
+    fn softmax_handles_large_values() {
+        let mut x = vec![1000.0, 1001.0, 1002.0];
+
+        softmax(&mut x);
+
+        assert!(x.iter().all(|v| v.is_finite()));
+
+        let sum: f32 = x.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn silu_zero_is_zero() {
+        assert_eq!(silu(0.0), 0.0);
+    }
+
+    #[test]
+    fn silu_positive_value() {
+        let y = silu(1.0);
+        assert!((y - 0.7310586).abs() < 1e-6);
+    }
+
+    #[test]
+    fn add_in_place_adds_vectors() {
+        let mut x = vec![1.0, 2.0, 3.0];
+        let mut y = vec![4.0, 5.0, 6.0];
+
+        add_in_place(&mut x, &mut y);
+
+        assert_eq!(x, vec![5.0, 7.0, 9.0]);
+    }
+
+    #[test]
+    fn rmsnorm_matches_hand_computation() {
+        let x = vec![3.0, 4.0];
+        let weight = vec![1.0, 1.0];
+        let mut out = vec![0.0; 2];
+
+        rmsnorm(&mut out, &x, &weight, 0.0);
+
+        // mean square = (9 + 16) / 2 = 12.5
+        // scale = 1 / sqrt(12.5)
+
+        let scale = 1.0 / 12.5_f32.sqrt();
+
+        assert!((out[0] - 3.0 * scale).abs() < 1e-6);
+        assert!((out[1] - 4.0 * scale).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rmsnorm_applies_weights() {
+        let x = vec![1.0, 1.0];
+        let weight = vec![2.0, 3.0];
+        let mut out = vec![0.0; 2];
+
+        rmsnorm(&mut out, &x, &weight, 0.0);
+
+        assert!((out[0] - 2.0).abs() < 1e-6);
+        assert!((out[1] - 3.0).abs() < 1e-6);
     }
 }
