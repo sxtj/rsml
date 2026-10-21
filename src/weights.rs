@@ -104,7 +104,7 @@ pub fn load_weights<'a>(cfg: &Config, floats: &'a [f32], shared_weights: bool) -
     let hidden = cfg.hidden_dim;
 
     let head_size = dim / cfg.n_heads;
-    let kv_dim = cfg.n_kv_heads;
+    let kv_dim = head_size * cfg.n_kv_heads;
 
     let token_embedding = cursor.take(cfg.vocab_size * dim);
 
@@ -122,6 +122,11 @@ pub fn load_weights<'a>(cfg: &Config, floats: &'a [f32], shared_weights: bool) -
     let w3 = cursor.take(l * hidden * dim);
 
     let rms_final = cursor.take(dim);
+
+    let rope_size = cfg.seq_len * head_size / 2;
+
+    cursor.take(rope_size);
+    cursor.take(rope_size);
 
     let wcls = if shared_weights {
         token_embedding
