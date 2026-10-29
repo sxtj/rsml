@@ -82,7 +82,7 @@ pub fn parse_config(bytes: &[u8]) -> Result<(Config, bool), String> {
     Ok((config, shared_weights))
 }
 
-fn read_floats(bytes: &[u8]) -> Result<Vec<f32>, String> {
+pub fn read_floats(bytes: &[u8]) -> Result<Vec<f32>, String> {
     if bytes.len() % 4 != 0 {
         return Err("Invalid float data length".to_string());
     }
