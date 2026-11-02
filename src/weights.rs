@@ -1,3 +1,5 @@
+use std::fmt::format;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
     pub dim: usize,        // transformer width
@@ -41,15 +43,18 @@ struct Cursor<'a> {
 }
 
 impl<'a> Cursor<'a> {
-    fn take(&mut self, n: usize) -> &'a [f32] {
+    fn take(&mut self, name: &str, n: usize) -> Result<&'a [f32], String> {
+        let remaining = self.data.len() - self.pos;
+
+        if n > remaining {
+            return Err(format!(
+                "{name} expected {n} floats, only {remaining} remain"
+            ));
+        }
+
         let start = self.pos;
-        let end = start + n;
-
-        let slice = &self.data[start..end];
-
-        self.pos = end;
-
-        slice
+        self.pos += n;
+        Ok(&self.data[start..self.pos])
     }
 }
 
@@ -66,6 +71,10 @@ pub fn parse_config(bytes: &[u8]) -> Result<(Config, bool), String> {
         header[i] = i32::from_le_bytes(bytes[start..start + 4].try_into().unwrap());
     }
 
+    if header[3] <= 0 || header[4] <= 0 {
+        return Err("Head counts must be positive".to_string());
+    }
+
     let raw_vocab = header[5];
     let shared_weights = raw_vocab > 0;
 
@@ -78,6 +87,14 @@ pub fn parse_config(bytes: &[u8]) -> Result<(Config, bool), String> {
         vocab_size: raw_vocab.unsigned_abs() as usize,
         seq_len: header[6] as usize,
     };
+
+    if config.dim % config.n_heads != 0 {
+        return Err("Dim must be divisble by n_heads".to_string());
+    }
+
+    if config.n_heads % config.n_kv_heads != 0 {
+        return Err("n_heads must be divisible by n_kv_heads".to_string());
+    }
 
     Ok((config, shared_weights))
 }
@@ -93,7 +110,11 @@ pub fn read_floats(bytes: &[u8]) -> Result<Vec<f32>, String> {
         .collect())
 }
 
-pub fn load_weights<'a>(cfg: &Config, floats: &'a [f32], shared_weights: bool) -> Weights<'a> {
+pub fn load_weights<'a>(
+    cfg: &Config,
+    floats: &'a [f32],
+    shared_weights: bool,
+) -> Result<Weights<'a>, String> {
     let mut cursor = Cursor {
         data: floats,
         pos: 0,
@@ -106,35 +127,35 @@ pub fn load_weights<'a>(cfg: &Config, floats: &'a [f32], shared_weights: bool) -
     let head_size = dim / cfg.n_heads;
     let kv_dim = head_size * cfg.n_kv_heads;
 
-    let token_embedding = cursor.take(cfg.vocab_size * dim);
+    let token_embedding = cursor.take("token_embedding", cfg.vocab_size * dim)?;
 
-    let rms_att = cursor.take(l * dim);
+    let rms_att = cursor.take("rms_att", l * dim)?;
 
-    let wq = cursor.take(l * dim * dim);
-    let wk = cursor.take(l * dim * kv_dim);
-    let wv = cursor.take(l * dim * kv_dim);
-    let wo = cursor.take(l * dim * dim);
+    let wq = cursor.take("wq", l * dim * dim)?;
+    let wk = cursor.take("wk", l * dim * kv_dim)?;
+    let wv = cursor.take("wv", l * dim * kv_dim)?;
+    let wo = cursor.take("wo", l * dim * dim)?;
 
-    let rms_ffn = cursor.take(l * dim);
+    let rms_ffn = cursor.take("rms_ffn", l * dim)?;
 
-    let w1 = cursor.take(l * hidden * dim);
-    let w2 = cursor.take(l * dim * hidden);
-    let w3 = cursor.take(l * hidden * dim);
+    let w1 = cursor.take("w1", l * hidden * dim)?;
+    let w2 = cursor.take("w2", l * dim * hidden)?;
+    let w3 = cursor.take("w3", l * hidden * dim)?;
 
-    let rms_final = cursor.take(dim);
+    let rms_final = cursor.take("rms_final", dim)?;
 
     let rope_size = cfg.seq_len * head_size / 2;
 
-    cursor.take(rope_size);
-    cursor.take(rope_size);
+    cursor.take("rope_cos", rope_size)?;
+    cursor.take("rope_sin", rope_size)?;
 
     let wcls = if shared_weights {
         token_embedding
     } else {
-        cursor.take(cfg.vocab_size * dim)
+        cursor.take("cfg.vocab_size", cfg.vocab_size * dim)?
     };
 
-    Weights {
+    Ok(Weights {
         token_embedding,
         rms_att,
         wq,
@@ -147,5 +168,5 @@ pub fn load_weights<'a>(cfg: &Config, floats: &'a [f32], shared_weights: bool) -
         w3,
         rms_final,
         wcls,
-    }
+    })
 }

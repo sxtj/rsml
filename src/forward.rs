@@ -1,11 +1,4 @@
-
-
-
-
-
-
-
-use crate::tensor::{embed, matvec, rmsnorm};
+use crate::tensor::{embed, matvec, rmsnorm, rope};
 use crate::weights::{Config, Weights};
 
 pub struct RunState {
@@ -113,7 +106,7 @@ impl<'a> Transformer<'a> {
         let dim = self.config.dim;
 
         let start = layer * dim * dim;
-        let end = layer + dim * dim;
+        let end = start + dim * dim;
 
         matvec(
             &mut self.state.q,
@@ -152,6 +145,26 @@ impl<'a> Transformer<'a> {
             &self.state.xb,
             kv_dim,
             dim,
+        );
+    }
+
+    pub fn apply_rope(&mut self, layer: usize, pos: usize) {
+        assert!(layer < self.config.n_layers);
+        assert!(pos < self.config.seq_len);
+
+        let head_size = self.config.dim / self.config.n_heads;
+        let kv_dim = head_size * self.config.n_kv_heads;
+
+        let start = (layer * self.config.seq_len + pos) * kv_dim;
+        let end = start + kv_dim;
+
+        rope(
+            &mut self.state.q,
+            &mut self.state.key_cache[start..end],
+            pos,
+            head_size,
+            kv_dim,
+            10_000.0,
         );
     }
 }

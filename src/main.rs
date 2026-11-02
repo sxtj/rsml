@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (config, shared_weights) = parse_config(&bytes)?;
     let floats = read_floats(&bytes[28..])?;
-    let weights = load_weights(&config, &floats, shared_weights);
+    let weights = load_weights(&config, &floats, shared_weights)?;
 
     let mut model = Transformer::new(config, weights);
 
@@ -25,9 +25,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("normalized: {:?}", &model.state.xb[..8]);
 
     model.project_query(0);
-    println!("query: {:?}", &model.state.q[..8]);
+    println!("query before RoPE: {:?}", &model.state.q[..8]);
 
     model.project_key_value(0, 0);
+    model.apply_rope(0, 0);
+
+    println!("query after RoPE: {:?}", &model.state.q[..8]);
     println!("key: {:?}", &model.state.key_cache[..8]);
     println!("value: {:?}", &model.state.value_cache[..8]);
 
